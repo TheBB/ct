@@ -1,3 +1,4 @@
+from abc import abstractmethod
 from random import choice
 
 
@@ -51,6 +52,14 @@ class Scrambler:
                 if self.valid(moves, candidate):
                     moves.append(candidate)
             yield ' '.join(str(m) for m in moves)
+
+    @abstractmethod
+    def random_move(self):
+        pass
+
+    @abstractmethod
+    def valid(self, moves, candidate):
+        pass
 
 
 class CubeScrambler(Scrambler):

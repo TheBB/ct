@@ -1,11 +1,9 @@
-from ct.scramble import CubeScrambler, CubeMove
+# from ct.scramble import CubeScrambler, CubeMove
+from ct.gui import run_gui
 
 
 def main():
-    scrambler = CubeScrambler(5)
-    for s in scrambler.scrambles():
-        print(s)
-        break
+    run_gui()
 
 
 if __name__ == '__main__':

@@ -44,14 +44,13 @@ class CubeMove:
 
 class Scrambler:
 
-    def scrambles(self):
-        while True:
-            moves = []
-            while len(moves) < self.length:
-                candidate = self.random_move()
-                if self.valid(moves, candidate):
-                    moves.append(candidate)
-            yield ' '.join(str(m) for m in moves)
+    def scramble(self):
+        moves = []
+        while len(moves) < self.length:
+            candidate = self.random_move()
+            if self.valid(moves, candidate):
+                moves.append(candidate)
+        return ' '.join(str(m) for m in moves)
 
     @abstractmethod
     def random_move(self):
@@ -64,20 +63,10 @@ class Scrambler:
 
 class CubeScrambler(Scrambler):
 
-    _length = {
-        2: 25,
-        3: 25,
-        4: 40,
-        5: 60,
-    }
-
-    def __init__(self, size=3):
+    def __init__(self, size=3, length=25):
         super(CubeScrambler, self).__init__()
         self.size = size
-
-    @property
-    def length(self):
-        return self._length[self.size]
+        self.length = length
 
     def random_move(self):
         widths = list(range(1, self.size // 2 + 1))

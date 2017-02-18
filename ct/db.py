@@ -71,13 +71,11 @@ class Discipline:
         self.last_scramble = self.puzzle['scrambler'].scramble()
         return self.last_scramble
 
-    def append(self, time=None, duration=None, remarks=None, scramble=None):
+    def append(self, duration, time=None, remarks=None, scramble=None):
         if time is None:
             time = datetime.utcnow()
         if scramble is None and hasattr(self, 'last_scramble'):
             scramble = self.last_scramble
-        if duration is None and remarks is None:
-            raise ValueError("Can't add DNF/DNS without remarks")
 
         solve = Solve(
             time=time,
@@ -100,11 +98,13 @@ class Solve(Base):
 
     id = Column(Integer, primary_key=True)
     time = Column(DateTime, nullable=False)
-    duration = Column(Integer)
+    duration = Column(Integer, nullable=False)
     puzzle = Column(String, nullable=False)
     blind = Column(Boolean, nullable=False, default=False)
     one_handed = Column(Boolean, nullable=False, default=False)
     feet = Column(Boolean, nullable=False, default=False)
+    plus_two = Column(Boolean, nullable=False, default=False)
+    dnf = Column(Boolean, nullable=False, default=False)
     remarks = Column(String)
     scramble = Column(String)
 
@@ -118,9 +118,25 @@ class Solve(Base):
         mins, sec = divmod(sec, 60)
         csec = msec // 10
         if mins > 0:
-            self.time.setText(f'{mins}:{sec:02}.{csec:02}')
+            base = f'{mins}:{sec:02}.{csec:02}'
         else:
-            self.time.setText(f'{sec}.{csec:02}')
+            base = f'{sec}.{csec:02}'
+
+        if self.plus_two:
+            base = f'{base} (+2)'
+
+        if self.dnf:
+            base = f'<s>{base}</s>'
+
+        return base
+
+    def save(self):
+        print(session.dirty)
+        session.commit()
+
+    def delete(self):
+        session.delete(self)
+        session.commit()
 
 
 Base.metadata.create_all(engine)

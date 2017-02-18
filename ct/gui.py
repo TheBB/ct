@@ -1,10 +1,10 @@
 from PyQt5.QtGui import QIcon, QPixmap
 from PyQt5.QtWidgets import (
     QApplication, QHBoxLayout, QMainWindow, QVBoxLayout, QWidget, QPushButton,
-    QButtonGroup, QLabel, QFrame, QScrollArea
+    QButtonGroup, QLabel, QFrame, QScrollArea, QComboBox, QMenu
 )
 
-from PyQt5.QtCore import Qt, QSize, QTimer
+from PyQt5.QtCore import Qt, QSize, QTimer, QEvent
 
 from ct.db import puzzles, Discipline
 from ct import default_puzzle
@@ -88,17 +88,52 @@ class DisciplineChoiceWidget(QWidget):
         self.make_discipline()
 
 
-class ResultWidget(QWidget):
+class ResultWidget(QFrame):
 
-    def __init__(self, parent):
-        super(ResultWidget, sefl).__init__(parent)
+    def __init__(self, master, solve):
+        super(ResultWidget, self).__init__(master)
+        self.master = master
+        self.setFrameShape(QFrame.StyledPanel)
+        self.solve = solve
+
+        self.setLayout(QHBoxLayout())
+
+        self.time = QLabel(solve.formatted_duration)
+        self.layout().addWidget(self.time)
+
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+
+        plus_two = menu.addAction('+2')
+        plus_two.setCheckable(True)
+        plus_two.setChecked(self.solve.plus_two)
+
+        dnf = menu.addAction('DNF')
+        dnf.setCheckable(True)
+        dnf.setChecked(self.solve.dnf)
+
+        delete = menu.addAction('Delete')
+
+        selected = menu.exec_(self.mapToGlobal(event.pos()))
+        if selected == plus_two:
+            self.solve.plus_two = not self.solve.plus_two
+            self.solve.save()
+        elif selected == dnf:
+            self.solve.dnf = not self.solve.dnf
+            self.solve.save()
+        elif selected == delete:
+            self.solve.delete()
+            self.master.layout.removeWidget(self)
+            self.setParent(None)
+
+        self.time.setText(self.solve.formatted_duration)
 
 
 class ResultsList(QScrollArea):
 
     def __init__(self):
         super(ResultsList, self).__init__()
-        self.setMaximumWidth(200)
+        self.setMaximumWidth(250)
 
         central = QWidget()
         self.setWidget(central)
@@ -108,7 +143,7 @@ class ResultsList(QScrollArea):
         self.layout.addStretch()
 
     def new_solve(self, solve):
-        self.layout.insertWidget(0, QPushButton(solve.discipline.name + ' ' + str(solve.duration)))
+        self.layout.insertWidget(0, ResultWidget(self, solve))
 
 
 class TimerWidget(QWidget):
@@ -200,7 +235,7 @@ class TimerWidget(QWidget):
 
     def finish_solve(self):
         self.state = TimerWidget.State.waiting
-        solve = self.discipline.append(duration=self.clock, scramble=self.scramble.text())
+        solve = self.discipline.append(self.clock, scramble=self.scramble.text())
         self.master.new_solve(solve)
         self.new_scramble()
 
@@ -239,7 +274,7 @@ class MasterWidget(QWidget):
         self.layout().addWidget(self.timer)
         self.layout().addWidget(self.results)
 
-        self.grabKeyboard()
+        # self.grabKeyboard()
 
     def new_solve(self, solve):
         self.results.new_solve(solve)
@@ -247,10 +282,9 @@ class MasterWidget(QWidget):
     def set_discipline(self, discipline):
         self.timer.discipline = discipline
 
-    def keyPressEvent(self, event):
-        if event.text() == ' ':
-            self.timer.trigger()
-            self.choice.setEnabled(self.timer.state == TimerWidget.State.waiting)
+    def trigger(self):
+        self.timer.trigger()
+        self.choice.setEnabled(self.timer.state == TimerWidget.State.waiting)
 
 
 class MainWindow(QMainWindow):
@@ -261,9 +295,19 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(MasterWidget())
 
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.KeyPress and event.text() in [' ', 'q']:
+            if event.text() == ' ':
+                self.centralWidget().trigger()
+            if event.text() == 'q':
+                self.close()
+            return True
+        return super(MainWindow, self).eventFilter(obj, event)
+
 
 def run_gui():
     app = QApplication(sys.argv)
     win = MainWindow()
+    app.installEventFilter(win)
     win.showMaximized()
     return app.exec_()

@@ -1,3 +1,4 @@
+from collections import namedtuple
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, DateTime, String, Boolean, Float, text as _text, bindparam
 from sqlalchemy.orm import sessionmaker
@@ -58,6 +59,9 @@ def text(s):
     return sql
 
 
+Record = namedtuple('Record', ['name', 'when', 'duration'])
+
+
 class Discipline:
 
     def __init__(self, puzzle, blind=False, one_handed=False, feet=False):
@@ -66,6 +70,7 @@ class Discipline:
         self.blind = blind
         self.one_handed = one_handed
         self.feet = feet
+        self._records = []
 
     @property
     def inspection(self):
@@ -98,6 +103,8 @@ class Discipline:
         if scramble is None and hasattr(self, 'last_scramble'):
             scramble = self.last_scramble
 
+        records = list(self.records())
+
         solve = Solve(
             time=time,
             duration=duration,
@@ -111,7 +118,34 @@ class Discipline:
         session.add(solve)
         session.commit()
 
-        return solve
+        new_records = []
+        self._records = []
+        for rec, cur in zip(records, self.current()):
+            if cur.duration < rec.duration:
+                rec = cur
+                new_records.append(cur)
+            self._records.append(rec)
+
+        return solve, new_records
+
+    def solve_fits(self, solve):
+        return all([
+            self.puzzle_name == solve.puzzle,
+            self.blind == solve.blind,
+            self.one_handed == solve.one_handed,
+            self.feet == solve.feet,
+        ])
+
+    def save(self, solve):
+        assert self.solve_fits(solve)
+        self._records = []
+        session.commit()
+
+    def delete(self, solve):
+        assert self.solve_fits(solve)
+        self._records = []
+        session.delete(solve)
+        session.commit()
 
     def bindings(self):
         return {
@@ -126,20 +160,24 @@ class Discipline:
         data = self.data()
         return computer.compute(data)
 
-    def records(self):
-        data = self.historical()
-        for k in data.columns:
-            when = data[k].argmin()
-            if isinstance(when, float) and isnan(when):
-                when = None
-            yield k, when, data[k].min()
+    def records(self, recompute=False):
+        if recompute or not self._records:
+            print('recomputing records')
+            data = self.historical()
+            self._records = []
+            for k in data.columns:
+                when = data[k].argmin()
+                if isinstance(when, float) and isnan(when):
+                    when = None
+                self._records.append(Record(k, when, data[k].min()))
+        yield from self._records
 
     def current(self):
         computer = self.stats_computer
         data = self.data(take=computer.minimum, recent=True)
         data = computer.compute(data)
         for k in data.columns:
-            yield k, data[k][-1]
+            yield Record(k, data.index[-1], data[k][-1])
 
     def data(self, take=None, recent=False):
         query = f"""
@@ -169,7 +207,7 @@ class Discipline:
 
         data = [(np.datetime64(row[0], 's'), row[1])
                 for row in engine.execute(query, bindings)]
-        data = np.array(data, dtype=[('time', 'datetime64[s]'), ('duration', '>i4')])
+        data = np.array(data, dtype=[('time', 'datetime64[s]'), ('duration', '>f4')])
         return pd.Series(data=data['duration'], index=data['time'])
 
     def __repr__(self):
@@ -203,13 +241,6 @@ class Solve(Base):
         if self.dnf:
             base = f'<s>{base}</s>'
         return base
-
-    def save(self):
-        session.commit()
-
-    def delete(self):
-        session.delete(self)
-        session.commit()
 
 
 Base.metadata.create_all(engine)

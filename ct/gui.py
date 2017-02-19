@@ -8,7 +8,7 @@ from PyQt5.QtGui import QIcon, QPixmap
 from PyQt5.QtWidgets import (
     QApplication, QHBoxLayout, QMainWindow, QVBoxLayout, QWidget, QPushButton,
     QButtonGroup, QLabel, QFrame, QScrollArea, QMenu, QDialog, QGridLayout,
-    QSizePolicy
+    QSizePolicy, QMessageBox
 )
 from PyQt5.QtCore import Qt, QEvent
 
@@ -90,7 +90,7 @@ class StatsWidget(QWidget):
         self.layout().addWidget(frame, 1, 0, 1, 4)
 
         self.next_row = 2
-        for (name, when, record), (_, latest) in zip(records, current):
+        for (name, when, record), (_, _, latest) in zip(records, current):
             if when:
                 when = when.strftime('%Y-%m-%d')
             else:
@@ -237,14 +237,17 @@ class ResultWidget(QFrame):
         selected = menu.exec_(self.mapToGlobal(event.pos()))
         if selected == plus_two:
             self.solve.plus_two = not self.solve.plus_two
-            self.solve.save()
+            if self.solve.plus_two:
+                self.solve.duration += 2000
+            else:
+                self.solve.duration -= 2000
+            timing.discipline.save(self.solve)
         elif selected == dnf:
             self.solve.dnf = not self.solve.dnf
-            self.solve.save()
+            timing.discipline.save(self.solve)
         elif selected == delete:
-            self.solve.delete()
-            self.master.layout.removeWidget(self)
-            self.setParent(None)
+            timing.discipline.delete(self.solve)
+            self.master.remove_widget(self)
 
         self.time.setText(self.solve.formatted_duration)
 
@@ -262,10 +265,23 @@ class ResultsList(QScrollArea):
         self.layout = QVBoxLayout(central)
         self.layout.addStretch()
 
-        timing.new_solve.register(self.new_solve)
+        self.widgets = []
 
-    def new_solve(self, solve):
-        self.layout.insertWidget(0, ResultWidget(self, solve))
+        timing.new_solve.register(self.new_solve)
+        timing.discipline_changed.register(self.discipline_changed)
+
+    def new_solve(self, solve, records):
+        self.widgets.append(ResultWidget(self, solve))
+        self.layout.insertWidget(0, self.widgets[-1])
+
+    def remove_widget(self, widget):
+        self.layout.removeWidget(widget)
+        widget.setParent(None)
+
+    def discipline_changed(self):
+        for w in self.widgets:
+            self.remove_widget(w)
+        self.widgets = []
 
 
 class TimerWidget(QWidget):
@@ -335,8 +351,9 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super(MainWindow, self).__init__()
         self.setWindowTitle('Cube Timer')
-
         self.setCentralWidget(MasterWidget())
+
+        timing.new_solve.register(self.new_solve)
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.KeyPress and event.text() in [' ', 'q', 'h', 'c']:
@@ -350,6 +367,18 @@ class MainWindow(QMainWindow):
                 HistoryDialog(timing.discipline, self).exec_()
             return True
         return super(MainWindow, self).eventFilter(obj, event)
+
+    def new_solve(self, solve, records):
+        if records:
+            msgbox = QMessageBox()
+            msgbox.setStyleSheet('QLabel { font-weight: bold; }')
+            msgbox.setWindowTitle('New records set')
+            msgbox.setIcon(QMessageBox.Information)
+            text = []
+            for r in records:
+                text.append(f'<p>{r.name}: {format_time(r.duration)}<p>')
+            msgbox.setText(''.join(text))
+            msgbox.exec_()
 
 
 def run_gui():

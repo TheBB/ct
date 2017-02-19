@@ -70,10 +70,10 @@ def _finish_solving():
     global state, scramble
     state = State.waiting
     state_changed()
-    solve = discipline.append(clock, scramble=scramble)
+    solve, records = discipline.append(clock, scramble=scramble)
     scramble = discipline.scramble()
     scramble_changed()
-    new_solve(solve)
+    new_solve(solve, records)
 
 
 def escape():

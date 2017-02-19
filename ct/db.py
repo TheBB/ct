@@ -1,10 +1,14 @@
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, DateTime, String, Boolean
+from sqlalchemy import create_engine, Column, Integer, DateTime, String, Boolean, Float, text as _text, bindparam
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from xdg import BaseDirectory
 
+import numpy as np
+import pandas as pd
+
 from ct.scramble import CubeScrambler
+from ct.util import format_time
 
 
 DATA_PATH = BaseDirectory.save_data_path('ct')
@@ -41,9 +45,20 @@ puzzles = {
 }
 
 
+def text(s):
+    sql = _text(s)
+
+    if 'puzzle' in sql._bindparams:
+        sql = sql.bindparams(bindparam('puzzle', String))
+    for param in set(sql._bindparams) & {'blind', 'one_handed', 'feet'}:
+        sql = sql.bindparams(bindparam(param, Boolean))
+
+    return sql
+
+
 class Discipline:
 
-    def __init__(self, puzzle, blind, one_handed, feet):
+    def __init__(self, puzzle, blind=False, one_handed=False, feet=False):
         self.puzzle_name = puzzle
         self.puzzle = puzzles[puzzle]
         self.blind = blind
@@ -92,6 +107,60 @@ class Discipline:
 
         return solve
 
+    def bindings(self):
+        return {
+            'puzzle': self.puzzle_name,
+            'blind': self.blind,
+            'one_handed': self.one_handed,
+            'feet': self.feet,
+        }
+
+    def current_average(self, total, drop_btm, drop_top):
+        query = text(sql.current_average)
+        bindings = self.bindings()
+        bindings.update({
+            'total': total,
+            'select': total - drop_btm - drop_top,
+            'drop_top': drop_top,
+        })
+        for row in engine.execute(query, bindings):
+            return row[0]
+        return None
+
+    def data(self, take=None, recent=False):
+        query = f"""
+        SELECT
+            time,
+            CASE WHEN dnf = 1 THEN NULL ELSE duration END AS duration
+        FROM solves
+        WHERE
+            puzzle = :puzzle AND
+            blind = :blind AND
+            one_handed = :one_handed AND
+            feet = :feet
+        ORDER BY time {'DESC' if recent else 'ASC'}
+        """
+
+        if take:
+            query = f'{query}\n LIMIT :total'
+        if recent:
+            query = f'SELECT * FROM ({query}) ORDER BY time ASC'
+
+        query = text(query)
+        query = query.columns(time=DateTime, duration=Integer)
+
+        bindings = self.bindings()
+        if take:
+            bindings['total'] = take
+
+        data = [(np.datetime64(row[0], 's'), row[1])
+                for row in engine.execute(query, bindings)]
+        data = np.array(data, dtype=[('time', 'datetime64[s]'), ('duration', '>i4')])
+        return pd.Series(data=data['duration'], index=data['time'])
+
+    def __repr__(self):
+        return self.name
+
 
 class Solve(Base):
     __tablename__ = 'solves'
@@ -114,24 +183,14 @@ class Solve(Base):
 
     @property
     def formatted_duration(self):
-        sec, msec = divmod(self.duration, 1000)
-        mins, sec = divmod(sec, 60)
-        csec = msec // 10
-        if mins > 0:
-            base = f'{mins}:{sec:02}.{csec:02}'
-        else:
-            base = f'{sec}.{csec:02}'
-
+        base = format_time(self.duration)
         if self.plus_two:
             base = f'{base} (+2)'
-
         if self.dnf:
             base = f'<s>{base}</s>'
-
         return base
 
     def save(self):
-        print(session.dirty)
         session.commit()
 
     def delete(self):

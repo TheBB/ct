@@ -1,17 +1,149 @@
+import matplotlib
+matplotlib.use('Qt5Agg')
+
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+
 from PyQt5.QtGui import QIcon, QPixmap
 from PyQt5.QtWidgets import (
     QApplication, QHBoxLayout, QMainWindow, QVBoxLayout, QWidget, QPushButton,
-    QButtonGroup, QLabel, QFrame, QScrollArea, QComboBox, QMenu
+    QButtonGroup, QLabel, QFrame, QScrollArea, QMenu, QDialog, QSplitter, QGridLayout,
+    QSpacerItem, QSizePolicy
 )
-
 from PyQt5.QtCore import Qt, QSize, QTimer, QEvent
 
 from ct.db import puzzles, Discipline
+from ct.util import format_time
 from ct import default_puzzle
+import ct.stats as stats
 
+from math import isnan
 from enum import Enum, auto
 from os.path import abspath, dirname, join
 import sys
+
+
+class ChartWidget(FigureCanvas):
+
+    def __init__(self, data, parent=None, width=5, height=4, dpi=100):
+        fig = Figure(figsize=(width, height), dpi=dpi)
+        axes = fig.add_subplot(111)
+
+        index = data['Single'].index
+        xs = list(range(len(index)))
+        axes.scatter(xs, data['Single'] / 1000, alpha=0.3, edgecolor='none', color='black')
+        data = {k: v for k, v in data.items() if k != 'Single'}
+
+        plot_kwargs = [
+            {
+                'color': '#0099ff',
+                'linestyle': 'dashed',
+                'linewidth': 2,
+            },
+            {
+                'color': '#3333ff',
+                'linestyle': 'solid',
+                'linewidth': 2,
+            },
+            {
+                'color': '#ff0000',
+                'linestyle': 'solid',
+                'linewidth': 2,
+            }
+        ]
+        for kwargs, (k, v) in zip(plot_kwargs, data.items()):
+            axes.plot(xs, v / 1000, **kwargs)
+
+        axes.set_xlim(xs[0], xs[-1])
+
+
+        xticks = [i for i in axes.get_xticks() if int(i) < len(index)]
+        xlabels = [index[int(i)].strftime('%Y-%m-%d') for i in xticks]
+        axes.set_xticks(xticks)
+        axes.set_xticklabels(xlabels)
+
+        ylabels = [format_time(t * 1000) for t in axes.get_yticks()]
+        axes.set_yticklabels(ylabels)
+
+        axes.grid()
+
+        FigureCanvas.__init__(self, fig)
+        self.setParent(parent)
+
+        FigureCanvas.setSizePolicy(
+            self, QSizePolicy.Expanding, QSizePolicy.Expanding
+        )
+        FigureCanvas.updateGeometry(self)
+
+
+class StatsWidget(QWidget):
+
+    def __init__(self, data):
+        super(StatsWidget, self).__init__()
+        self.setMaximumWidth(500)
+
+        self.setLayout(QGridLayout())
+        self.layout().setHorizontalSpacing(30)
+
+        for c, t in [(1, 'BEST'), (2, 'WHEN'), (3, 'LAST')]:
+            label = QLabel(t)
+            label.setStyleSheet('QLabel { font-size: 15pt; font-weight: bold; }')
+            self.layout().addWidget(label, 0, c)
+
+        frame = QFrame()
+        frame.setFrameShape(QFrame.HLine)
+        frame.setFrameShadow(QFrame.Sunken)
+        self.layout().addWidget(frame, 1, 0, 1, 4)
+
+        self.next_row = 2
+        for c, d in data.items():
+            when = d.argmin()
+            if isinstance(when, float) and isnan(when):
+                when = '--'
+            else:
+                when = when.strftime('%Y-%m-%d')
+            self.add_row(
+                c.upper(),
+                format_time(d.min()),
+                when,
+                format_time(d[-1])
+            )
+
+        self.layout().setRowStretch(self.next_row, 1000)
+
+    def add_row(self, title, best, when, current):
+        label = QLabel(title)
+        label.setStyleSheet('QLabel { font-weight: bold; }')
+        self.layout().addWidget(label, self.next_row, 0)
+
+        label = QLabel(best)
+        label.setAlignment(Qt.AlignRight)
+        self.layout().addWidget(label, self.next_row, 1)
+
+        label = QLabel(when)
+        label.setAlignment(Qt.AlignRight)
+        self.layout().addWidget(label, self.next_row, 2)
+
+        label = QLabel(current)
+        label.setAlignment(Qt.AlignRight)
+        self.layout().addWidget(label, self.next_row, 3)
+
+        self.next_row += 1
+
+
+class HistoryDialog(QDialog):
+
+    def __init__(self, discipline, parent=None):
+        super(HistoryDialog, self).__init__(parent)
+        self.setWindowTitle(f'History for {discipline.name}')
+        self.showMaximized()
+
+        data = discipline.data()
+        data = {k: c(data) for k, c in stats.stats.items()}
+
+        self.setLayout(QHBoxLayout())
+        self.layout().addWidget(StatsWidget(data))
+        self.layout().addWidget(ChartWidget(data, parent=self))
 
 
 class DisciplineChoiceWidget(QWidget):
@@ -242,15 +374,8 @@ class TimerWidget(QWidget):
     def update_timer(self):
         if self.clock is None:
             self.time.setText('--:--.--')
-
         else:
-            sec, msec = divmod(self.clock, 1000)
-            mins, sec = divmod(sec, 60)
-            csec = msec // 10
-            if mins > 0:
-                self.time.setText(f'{mins}:{sec:02}.{csec:02}')
-            else:
-                self.time.setText(f'{sec}.{csec:02}')
+            self.time.setText(format_time(self.clock))
 
     def trigger(self):
         if self.state == TimerWidget.State.waiting:
@@ -274,8 +399,6 @@ class MasterWidget(QWidget):
         self.layout().addWidget(self.timer)
         self.layout().addWidget(self.results)
 
-        # self.grabKeyboard()
-
     def new_solve(self, solve):
         self.results.new_solve(solve)
 
@@ -293,14 +416,17 @@ class MainWindow(QMainWindow):
         super(MainWindow, self).__init__()
         self.setWindowTitle('Cube Timer')
 
-        self.setCentralWidget(MasterWidget())
+        self.master = MasterWidget()
+        self.setCentralWidget(self.master)
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.KeyPress and event.text() in [' ', 'q']:
+        if event.type() == QEvent.KeyPress and event.text() in [' ', 'q', 'h']:
             if event.text() == ' ':
                 self.centralWidget().trigger()
             if event.text() == 'q':
                 self.close()
+            if event.text() == 'h':
+                HistoryDialog(self.master.timer.discipline, self).exec_()
             return True
         return super(MainWindow, self).eventFilter(obj, event)
 

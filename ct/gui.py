@@ -31,8 +31,8 @@ class ChartWidget(FigureCanvas):
 
         index = data['Single'].index
         xs = list(range(len(index)))
-        axes.scatter(xs, data['Single'] / 1000, alpha=0.3, edgecolor='none', color='black')
-        data = {k: v for k, v in data.items() if k != 'Single'}
+        axes.scatter(xs, data['Single'] / 1000, alpha=0.3, edgecolor='none', color='black', label='Single')
+        data = data.drop('Single', 'columns')
 
         plot_kwargs = [
             {
@@ -52,10 +52,10 @@ class ChartWidget(FigureCanvas):
             }
         ]
         for kwargs, (k, v) in zip(plot_kwargs, data.items()):
-            axes.plot(xs, v / 1000, **kwargs)
+            axes.plot(xs, v / 1000, label=k, **kwargs)
 
         axes.set_xlim(xs[0], xs[-1])
-
+        axes.legend()
 
         xticks = [i for i in axes.get_xticks() if int(i) < len(index)]
         xlabels = [index[int(i)].strftime('%Y-%m-%d') for i in xticks]
@@ -78,7 +78,7 @@ class ChartWidget(FigureCanvas):
 
 class StatsWidget(QWidget):
 
-    def __init__(self, data):
+    def __init__(self, records, current):
         super(StatsWidget, self).__init__()
         self.setMaximumWidth(500)
 
@@ -96,18 +96,12 @@ class StatsWidget(QWidget):
         self.layout().addWidget(frame, 1, 0, 1, 4)
 
         self.next_row = 2
-        for c, d in data.items():
-            when = d.argmin()
-            if isinstance(when, float) and isnan(when):
-                when = '--'
-            else:
+        for (name, when, record), (_, latest) in zip(records, current):
+            if when:
                 when = when.strftime('%Y-%m-%d')
-            self.add_row(
-                c.upper(),
-                format_time(d.min()),
-                when,
-                format_time(d[-1])
-            )
+            else:
+                when = '--'
+            self.add_row(name.upper(), format_time(record), when, format_time(latest))
 
         self.layout().setRowStretch(self.next_row, 1000)
 
@@ -138,12 +132,9 @@ class HistoryDialog(QDialog):
         self.setWindowTitle(f'History for {discipline.name}')
         self.showMaximized()
 
-        data = discipline.data()
-        data = {k: c(data) for k, c in stats.stats.items()}
-
         self.setLayout(QHBoxLayout())
-        self.layout().addWidget(StatsWidget(data))
-        self.layout().addWidget(ChartWidget(data, parent=self))
+        self.layout().addWidget(StatsWidget(discipline.records(), discipline.current()))
+        self.layout().addWidget(ChartWidget(discipline.historical(), parent=self))
 
 
 class DisciplineChoiceWidget(QWidget):

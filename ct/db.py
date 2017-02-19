@@ -3,12 +3,14 @@ from sqlalchemy import create_engine, Column, Integer, DateTime, String, Boolean
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from xdg import BaseDirectory
+from math import isnan
 
 import numpy as np
 import pandas as pd
 
 from ct.scramble import CubeScrambler
 from ct.util import format_time
+from ct.stats import default_stats
 
 
 DATA_PATH = BaseDirectory.save_data_path('ct')
@@ -82,6 +84,10 @@ class Discipline:
             args.append('FEET')
         return ' '.join(args)
 
+    @property
+    def stats_computer(self):
+        return default_stats
+
     def scramble(self):
         self.last_scramble = self.puzzle['scrambler'].scramble()
         return self.last_scramble
@@ -115,17 +121,25 @@ class Discipline:
             'feet': self.feet,
         }
 
-    def current_average(self, total, drop_btm, drop_top):
-        query = text(sql.current_average)
-        bindings = self.bindings()
-        bindings.update({
-            'total': total,
-            'select': total - drop_btm - drop_top,
-            'drop_top': drop_top,
-        })
-        for row in engine.execute(query, bindings):
-            return row[0]
-        return None
+    def historical(self):
+        computer = self.stats_computer
+        data = self.data()
+        return computer.compute(data)
+
+    def records(self):
+        data = self.historical()
+        for k in data.columns:
+            when = data[k].argmin()
+            if isinstance(when, float) and isnan(when):
+                when = None
+            yield k, when, data[k].min()
+
+    def current(self):
+        computer = self.stats_computer
+        data = self.data(take=computer.minimum, recent=True)
+        data = computer.compute(data)
+        for k in data.columns:
+            yield k, data[k][-1]
 
     def data(self, take=None, recent=False):
         query = f"""

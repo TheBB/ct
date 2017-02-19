@@ -162,7 +162,6 @@ class Discipline:
 
     def records(self, recompute=False):
         if recompute or not self._records:
-            print('recomputing records')
             data = self.historical()
             self._records = []
             for k in data.columns:

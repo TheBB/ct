@@ -34,11 +34,12 @@ class ChartWidget(FigureCanvas):
         plot_kwargs = [
             {
                 'color': '#0099ff',
-                'linestyle': 'dashed',
+                'linestyle': 'solid',
                 'linewidth': 2,
+                'alpha': 0.6,
             },
             {
-                'color': '#3333ff',
+                'color': '#0000bb',
                 'linestyle': 'solid',
                 'linewidth': 2,
             },
@@ -353,7 +354,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle('Cube Timer')
         self.setCentralWidget(MasterWidget())
 
-        timing.new_solve.register(self.new_solve)
+        # timing.new_solve.register(self.new_solve)
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.KeyPress and event.text() in [' ', 'q', 'h', 'c']:

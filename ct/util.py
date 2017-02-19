@@ -2,7 +2,7 @@ from math import isnan
 
 
 def format_time(time):
-    if isnan(time):
+    if time is None or isnan(time):
         return '--:--.--'
     sec, msec = divmod(int(time), 1000)
     mins, sec = divmod(sec, 60)

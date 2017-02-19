@@ -7,18 +7,15 @@ from matplotlib.figure import Figure
 from PyQt5.QtGui import QIcon, QPixmap
 from PyQt5.QtWidgets import (
     QApplication, QHBoxLayout, QMainWindow, QVBoxLayout, QWidget, QPushButton,
-    QButtonGroup, QLabel, QFrame, QScrollArea, QMenu, QDialog, QSplitter, QGridLayout,
-    QSpacerItem, QSizePolicy
+    QButtonGroup, QLabel, QFrame, QScrollArea, QMenu, QDialog, QGridLayout,
+    QSizePolicy
 )
-from PyQt5.QtCore import Qt, QSize, QTimer, QEvent
+from PyQt5.QtCore import Qt, QEvent
 
 from ct.db import puzzles, Discipline
 from ct.util import format_time
-from ct import default_puzzle
-import ct.stats as stats
+import ct.timing as timing
 
-from math import isnan
-from enum import Enum, auto
 from os.path import abspath, dirname, join
 import sys
 
@@ -67,13 +64,10 @@ class ChartWidget(FigureCanvas):
 
         axes.grid()
 
-        FigureCanvas.__init__(self, fig)
+        super(ChartWidget, self).__init__(fig)
         self.setParent(parent)
-
-        FigureCanvas.setSizePolicy(
-            self, QSizePolicy.Expanding, QSizePolicy.Expanding
-        )
-        FigureCanvas.updateGeometry(self)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.updateGeometry()
 
 
 class StatsWidget(QWidget):
@@ -187,10 +181,13 @@ class DisciplineChoiceWidget(QWidget):
 
         self.layout().addStretch()
 
-        self.make_discipline()
+        timing.state_changed.register(self.state_changed)
+
+    def state_changed(self):
+        self.setEnabled(timing.state == timing.State.waiting)
 
     def make_discipline(self):
-        self.main.set_discipline(Discipline(
+        timing.set_discipline(Discipline(
             self.puzzle, self.blind, self.one_handed, self.feet
         ))
 
@@ -265,17 +262,13 @@ class ResultsList(QScrollArea):
         self.layout = QVBoxLayout(central)
         self.layout.addStretch()
 
+        timing.new_solve.register(self.new_solve)
+
     def new_solve(self, solve):
         self.layout.insertWidget(0, ResultWidget(self, solve))
 
 
 class TimerWidget(QWidget):
-
-    class State(Enum):
-        waiting = auto()
-        solving = auto()
-
-    _state = State.waiting
 
     def __init__(self, master):
         super(TimerWidget, self).__init__()
@@ -303,76 +296,22 @@ class TimerWidget(QWidget):
 
         self.layout().addStretch()
 
-        self.puzzle= puzzle
+        self.puzzle = puzzle
         self.scramble = scramble
         self.time = time
-        self.clock = None
 
-        self.update_timer()
+        for event in ['discipline_changed', 'scramble_changed', 'clock_changed']:
+            getattr(self, event)()
+            getattr(timing, event).register(getattr(self, event))
 
-    @property
-    def discipline(self):
-        return self._discipline
+    def discipline_changed(self):
+        self.puzzle.setText(timing.discipline.name)
 
-    @discipline.setter
-    def discipline(self, discipline):
-        self._discipline = discipline
-        self.puzzle.setText(discipline.name)
-        self.clock = None
-        self.update_timer()
-        self.new_scramble()
+    def scramble_changed(self):
+        self.scramble.setText(timing.scramble)
 
-    @property
-    def state(self):
-        return self._state
-
-    @state.setter
-    def state(self, state):
-        self._state = state
-
-    def new_scramble(self):
-        self.scramble.setText(self.discipline.scramble())
-
-    def start_solving(self):
-        self.state = TimerWidget.State.solving
-        self.clock = 0
-        self.update_timer()
-
-        timer = QTimer()
-        timer.timeout.connect(lambda: self.solution_timeout(timer))
-        timer.start(10)
-
-    def solution_timeout(self, timer):
-        if self.state != TimerWidget.State.solving:
-            timer.stop()
-            return
-
-        self.clock += 10
-        self.update_timer()
-
-    def abort_solve(self):
-        self.state = TimerWidget.State.waiting
-        self.clock = None
-        self.new_scramble()
-        self.update_timer()
-
-    def finish_solve(self):
-        self.state = TimerWidget.State.waiting
-        solve = self.discipline.append(self.clock, scramble=self.scramble.text())
-        self.master.new_solve(solve)
-        self.new_scramble()
-
-    def update_timer(self):
-        if self.clock is None:
-            self.time.setText('--:--.--')
-        else:
-            self.time.setText(format_time(self.clock))
-
-    def trigger(self):
-        if self.state == TimerWidget.State.waiting:
-            self.start_solving()
-        elif self.state == TimerWidget.State.solving:
-            self.finish_solve()
+    def clock_changed(self):
+        self.time.setText(format_time(timing.clock))
 
 
 class MasterWidget(QWidget):
@@ -390,16 +329,6 @@ class MasterWidget(QWidget):
         self.layout().addWidget(self.timer)
         self.layout().addWidget(self.results)
 
-    def new_solve(self, solve):
-        self.results.new_solve(solve)
-
-    def set_discipline(self, discipline):
-        self.timer.discipline = discipline
-
-    def trigger(self):
-        self.timer.trigger()
-        self.choice.setEnabled(self.timer.state == TimerWidget.State.waiting)
-
 
 class MainWindow(QMainWindow):
 
@@ -407,17 +336,18 @@ class MainWindow(QMainWindow):
         super(MainWindow, self).__init__()
         self.setWindowTitle('Cube Timer')
 
-        self.master = MasterWidget()
-        self.setCentralWidget(self.master)
+        self.setCentralWidget(MasterWidget())
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.KeyPress and event.text() in [' ', 'q', 'h']:
+        if event.type() == QEvent.KeyPress and event.text() in [' ', 'q', 'h', 'c']:
             if event.text() == ' ':
-                self.centralWidget().trigger()
+                timing.trigger()
+            if event.text() == 'c':
+                timing.escape()
             if event.text() == 'q':
                 self.close()
             if event.text() == 'h':
-                HistoryDialog(self.master.timer.discipline, self).exec_()
+                HistoryDialog(timing.discipline, self).exec_()
             return True
         return super(MainWindow, self).eventFilter(obj, event)
 

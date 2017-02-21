@@ -78,13 +78,12 @@ def _finish_solving():
 
 def escape():
     global state, clock, scramble
-    if state == State.solving:
-        state = State.waiting
-        state_changed()
-        clock = None
-        clock_changed()
-        scramble = discipline.scramble()
-        scramble_changed()
+    state = State.waiting
+    state_changed()
+    clock = None
+    clock_changed()
+    scramble = discipline.scramble()
+    scramble_changed()
 
 
 def trigger():

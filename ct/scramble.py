@@ -22,7 +22,7 @@ class CubeMove:
     def same_axis(self, other):
         return self.side in {
             side: group
-            for group in ['FB', 'UD', 'LF']
+            for group in ['FB', 'UD', 'LR']
             for side in group
         }[other.side]
 
@@ -40,6 +40,9 @@ class CubeMove:
         if self.size <= 5:
             return f"{self.side}{'w' if self.width > 1 else ''}{amount}"
         return f"{self.width if self.width > 1 else ''}{self.side}{amount}"
+
+    def __repr__(self):
+        return str(self)
 
 
 class Scrambler:
@@ -71,7 +74,7 @@ class CubeScrambler(Scrambler):
     def random_move(self):
         widths = list(range(1, self.size // 2 + 1))
         amounts = [1, 2, -1]
-        sides = 'FBUDLF'
+        sides = 'FBUDLR'
         return CubeMove(choice(sides), choice(widths), choice(amounts), self.size)
 
     def valid(self, moves, candidate):

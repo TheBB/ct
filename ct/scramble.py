@@ -19,6 +19,12 @@ class CubeMove:
             ])
         return False
 
+    @property
+    def slice(self):
+        if self.side in 'LBD':
+            return self.size - self.width
+        return self.width
+
     def same_axis(self, other):
         return self.side in {
             side: group
@@ -79,16 +85,12 @@ class CubeScrambler(Scrambler):
 
     def valid(self, moves, candidate):
         valid = True
-        n_same_axis, max_same_axis = 0, self.size - 1
+        slices = {candidate.slice}
         for m in moves[::-1]:
             if not m.same_axis(candidate):
                 break
-            if m.same_layers(candidate):
+            if m.slice in slices:
                 valid = False
                 break
-            else:
-                n_same_axis += 1
-                if n_same_axis == max_same_axis:
-                    valid = False
-                    break
+            slices.add(m.slice)
         return valid
